@@ -1,5 +1,5 @@
 """Deterministic, chunked synthesis. No GUI or audio device required."""
-from dataclasses import dataclass, asdict, fields
+from dataclasses import dataclass, asdict
 import json
 import math
 import os
@@ -17,6 +17,9 @@ class Patch:
     detune: float = 7.0
     mix: float = 0.35
     noise: float = 0.03
+    pan1: float = 0.0
+    pan2: float = 0.0
+    noise_pan: float = 0.0
     cutoff: float = 3500.0
     resonance: float = 0.15
     attack: float = 0.01
@@ -31,6 +34,7 @@ class Patch:
     mod_amount: float = 0.0
 
 LIMITS = {
+ 'pan1':(-1,1), 'pan2':(-1,1), 'noise_pan':(-1,1),
  'detune':(-100,100), 'mix':(0,1), 'noise':(0,1), 'cutoff':(40,12000),
  'resonance':(0,0.9), 'attack':(0.001,3), 'decay':(0.001,3),
  'sustain':(0,1), 'release':(0.01,5), 'filter_env':(0,10000),
@@ -73,7 +77,7 @@ def osc(phase,kind,step):
 class Voice:
     def __init__(self,p,note=60,rate=RATE):
         self.p=validate(p); self.rate=rate; self.freq=440*2**((note-69)/12)
-        self.i=0; self.phase1=0.; self.phase2=0.; self.low=0.; self.band=0.
+        self.i=0; self.phase1=0.; self.phase2=0.; self.low=[0.,0.]; self.band=[0.,0.]
         self.off=None; self.off_level=0.; self.rng=np.random.default_rng(42)
     def env(self,t):
         p=self.p
@@ -86,7 +90,8 @@ class Voice:
     def finished(self):
         return self.off is not None and self.i-self.off>=round(self.p.release*self.rate)
     def block(self,n):
-        p=self.p; out=np.empty(n,dtype=np.float32); noise=self.rng.uniform(-1,1,n)
+        p=self.p; out=np.empty((n,2),dtype=np.float32); noise=self.rng.uniform(-1,1,n)
+        gains=[(math.cos((pan+1)*math.pi/4), math.sin((pan+1)*math.pi/4)) for pan in (p.pan1,p.pan2,p.noise_pan)]
         for j in range(n):
             t=self.i/self.rate; e=self.env(t)
             if self.off is not None: e=self.off_level*max(0,1-(self.i-self.off)/(p.release*self.rate))
@@ -95,13 +100,13 @@ class Voice:
             b=osc(self.phase2,p.wave2,d2)
             a=osc(self.phase1+(p.mod_amount*b/(2*math.pi) if p.modulation=='FM' else 0),p.wave1,d1)
             if p.modulation=='Ring': a*=1-min(p.mod_amount,1)+min(p.mod_amount,1)*b
-            x=((1-p.mix)*a+p.mix*b+p.noise*noise[j])/(1+p.noise)
-            # Topology-preserving state variable lowpass, stable under cutoff modulation.
             g=math.tan(math.pi*min(16000,p.cutoff+p.filter_env*e)/self.rate)
             k=2-1.9*p.resonance
-            v1=(self.band+g*(x-self.low))/(1+g*(g+k)); v2=self.low+g*v1
-            self.band=2*v1-self.band; self.low=2*v2-self.low
-            out[j]=0.75*math.tanh(v2*p.drive)*e
+            for ch in range(2):
+                x=((1-p.mix)*a*gains[0][ch]+p.mix*b*gains[1][ch]+p.noise*noise[j]*gains[2][ch])/(1+p.noise)
+                v1=(self.band[ch]+g*(x-self.low[ch]))/(1+g*(g+k)); v2=self.low[ch]+g*v1
+                self.band[ch]=2*v1-self.band[ch]; self.low[ch]=2*v2-self.low[ch]
+                out[j,ch]=0.75*math.tanh(v2*p.drive)*e
             self.phase1=(self.phase1+d1)%1; self.phase2=(self.phase2+d2)%1; self.i+=1
         return out
 
@@ -114,7 +119,7 @@ def render(p,note,hold,path,progress=lambda x:None,cancel=lambda:False):
     path=Path(path); fd,tmp=tempfile.mkstemp(dir=path.parent,suffix='.wav'); os.close(fd)
     try:
         with wave.open(tmp,'wb') as w:
-            w.setnchannels(1); w.setsampwidth(2); w.setframerate(RATE)
+            w.setnchannels(2); w.setsampwidth(2); w.setframerate(RATE)
             while v.i<total:
                 if cancel(): raise Cancelled()
                 if v.i>=held: v.release()
