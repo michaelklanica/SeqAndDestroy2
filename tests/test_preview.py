@@ -26,7 +26,7 @@ class PreviewTests(unittest.TestCase):
         preview=self.run_worker(Export(p,65,.12))
         with tempfile.TemporaryDirectory() as d:
             exported=self.run_worker(Export(p,65,.12,str(Path(d)/'a.wav')))
-        np.testing.assert_array_equal(preview[0],exported[0]); np.testing.assert_array_equal(preview[1],exported[1])
+        np.testing.assert_array_equal(preview[0],exported[0]); self.assertIsNone(preview[1]); self.assertIsNone(exported[1])
         self.assertTrue(preview[2]); self.assertFalse(exported[2])
     def test_window_analysis(self):
         temp=tempfile.TemporaryDirectory(); self.addCleanup(temp.cleanup)

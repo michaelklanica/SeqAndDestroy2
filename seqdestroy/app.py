@@ -9,7 +9,7 @@ from PySide6.QtGui import QPainter,QColor,QPolygonF,QImage
 from PySide6.QtWidgets import QApplication,QMainWindow,QWidget,QVBoxLayout,QHBoxLayout,QFormLayout,QDoubleSpinBox,QSpinBox,QComboBox,QPushButton,QLabel,QFileDialog,QMessageBox,QProgressDialog,QGroupBox
 from PySide6.QtMultimedia import QAudioFormat,QAudioSink,QMediaDevices
 from .windows import VisualizationWindow
-from .analysis import spectrogram
+from .spectrogram import Spectrogram
 from .engine import Patch,LIMITS,Voice,RATE,render,save_patch,load_patch,Cancelled
 
 class Plot(QWidget):
@@ -24,35 +24,6 @@ class Plot(QWidget):
         ids=np.linspace(0,len(a)-1,min(len(a),self.width())).astype(int)
         p.drawPolyline(QPolygonF([QPointF(i*(self.width()-1)/(len(ids)-1),30+(1-a[j])*(self.height()-40)) for i,j in enumerate(ids)]))
 
-class Spectrogram(QWidget):
-    def __init__(self):
-        super().__init__(); self.setMinimumHeight(210); self.image=None; self.duration=0; self.position=None; self.pending_data=None
-    def set_data(self,db,duration):
-        self.duration=duration; self.position=None
-        if not self.isVisible():
-            self.pending_data=(db,duration)
-            return
-        self.pending_data=None
-        level=np.clip((db[::-1]+90)/90,0,1)
-        rgb=np.stack((255*level**.6,220*level**1.5,100*level**3),axis=-1).astype(np.uint8)
-        h,w,_=rgb.shape; self.image=QImage(rgb.data,w,h,3*w,QImage.Format.Format_RGB888).copy()
-        self.duration=duration; self.position=None; self.update()
-    def showEvent(self,event):
-        if self.pending_data is not None:self.set_data(*self.pending_data)
-        super().showEvent(event)
-    def paintEvent(self,event):
-        p=QPainter(self); p.fillRect(self.rect(),QColor('#14212b')); p.setPen(QColor('#c2ddd8'))
-        p.drawText(10,18,'Spectrogram · combined stereo power · logarithmic frequency · dark −90 / bright 0 dBFS')
-        area=QRectF(55,30,self.width()-70,self.height()-60)
-        if self.image:p.drawImage(area,self.image)
-        else:p.drawText(65,65,'Use Timed preview or Render sample to analyze the complete sound.')
-        for hz in (40,100,1000,10000,24000):
-            y=area.bottom()-np.log(hz/40)/np.log(24000/40)*area.height()
-            p.drawText(2,int(y),str(hz))
-        p.drawText(55,self.height()-8,'0 s'); p.drawText(self.width()-110,self.height()-8,f'{self.duration:.2f} s')
-        if self.position is not None and self.duration:
-            x=area.left()+min(1,self.position/self.duration)*area.width(); p.setPen(QColor('#ffffff')); p.drawLine(QPointF(x,area.top()),QPointF(x,area.bottom()))
-
 class Export(QThread):
     progress=Signal(int); result=Signal(str); prepared=Signal(object,object,bool)
     def __init__(self,p,note,hold,path=None):
@@ -64,10 +35,10 @@ class Export(QThread):
                 render(*self.args[:3],path,progress=lambda n:self.progress.emit(int(n*.8)),cancel=lambda:self.cancelled)
                 if self.args[3]:save_patch(path+'.patch.json',self.args[0])
                 with wave.open(path) as wav:audio=np.frombuffer(wav.readframes(wav.getnframes()),dtype='<i2').reshape(-1,2).copy()
-                _,db=spectrogram(audio,cancel=lambda:self.cancelled)
+                db=None  # Analysis is scheduled independently by the visualization panel.
                 if self.cancelled:raise Cancelled()
                 self.prepared.emit(audio,db,self.args[3] is None); self.progress.emit(100)
-                self.result.emit('Timed preview ready.' if self.args[3] is None else 'Saved WAV and companion patch; spectrogram updated.')
+                self.result.emit('Timed preview ready.' if self.args[3] is None else 'Saved WAV and companion patch; spectrogram analysis scheduled.')
         except Cancelled:self.result.emit('Cancelled. Any export already completed remains saved.')
         except Exception as e:self.result.emit('Render/analysis error: '+str(e))
 
@@ -178,13 +149,13 @@ class Window(QMainWindow):
         self.begin_render()
     def begin_render(self,path=None):
         self.stop_preview()
-        self.dialog=QProgressDialog('Rendering stereo sound and spectrogram…','Cancel',0,100,self)
+        self.dialog=QProgressDialog('Rendering stereo sound…','Cancel',0,100,self)
         self.dialog.setAutoClose(False); self.dialog.setAutoReset(False); self.dialog.setWindowModality(Qt.WindowModality.WindowModal)
         self.worker=Export(self.patch(),self.note.value(),self.hold.value(),path)
         self.worker.progress.connect(self.dialog.setValue); self.worker.result.connect(self.export_done); self.worker.prepared.connect(self.prepared)
         self.dialog.canceled.connect(lambda:setattr(self.worker,'cancelled',True)); self.worker.start(); self.dialog.show()
     def prepared(self,a,db,preview):
-        self.spectrogram.set_data(db,len(a)/RATE)
+        self.spectrogram.set_audio(a,RATE)
         self.display_audio(a[:2048].astype(np.float32)/32768)
         if preview and self.setup_audio():
             self.preview_audio=a; self.preview_buffer=QBuffer(self); self.preview_buffer.setData(QByteArray(a.tobytes()))
@@ -224,6 +195,7 @@ class Window(QMainWindow):
         self.dialog.close()
         if message!='Timed preview ready.' or self.preview_buffer is not None:self.status.setText(message)
     def closeEvent(self,e):
+        self.spectrogram.shutdown()
         self.timer.stop()
         QApplication.instance().removeEventFilter(self)
         for window in self.visualizations.values():

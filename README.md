@@ -34,10 +34,22 @@ Window positions, sizes, and visibility are saved when you close the main applic
 
 Hidden/minimized live plots skip refresh work. Full-sample spectrogram analysis still runs after rendering, so the latest result is available when reopened; image construction is deferred while hidden. On Linux, layout preferences normally live in `~/.config/SeqAndDestroy/SeqAndDestroy2.conf` (or beneath `XDG_CONFIG_HOME` if set), separately from projects.
 
+## Spectrogram detail and zoom
+
+After **Timed preview** or **Render sample**, the spectrogram analyzes that audio in its own background worker. Playback can start without waiting for analysis. Changing analysis controls reuses the last rendered audio; it does not synthesize a different sound.
+
+- **Quality:** Fast, Balanced (default), or Detailed. These increase frequency display rows and time sampling density. Maximum time columns are 512 / 1600 / 4096 and frequency rows are 256 / 512 / 1024. Detailed data is calculated, not merely upscaled.
+- **Transient:** a 512-sample window (10.7 ms at 48 kHz) for attacks and fast changes. Detailed uses a finer time step; frequency precision remains limited by the short window.
+- **Tonal:** 4096 / 8192 / 16384-sample windows by quality. Detailed has 2.93 Hz FFT spacing at 48 kHz, but this is not a guarantee of resolving tones that close: the Hann window broadens peaks. Long windows smear rapid events.
+- **Zoom:** type Start/End seconds and Low/High Hz, then press **Analyze / zoom**. This recomputes the selected region at the chosen quality. **Full range** restores the complete sample and frequency range. This version uses numeric range controls, not mouse-wheel zoom.
+- **Cancel analysis** stops pending work and retains the last completed image. Progress appears in the spectrogram window. The status beneath it identifies the displayed result's mode, quality, window duration, FFT spacing, time step, and cell count.
+
+The independent analysis component accepts mono or multichannel int16 PCM or normalized floating-point audio with an explicit sample rate. It can be reused for future rendered sequencer tracks/mixes; sequencer source selection is not implemented yet.
+
 ## Prototype limits
 
 - Audition is monophonic. Audio output must support 48 kHz stereo PCM. No physical output device is available in cloud testing; audition and MPC import need testing on the user's hardware.
-- Waveform and linear-frequency spectrum show the mono average of recent playback. The full-sample spectrogram uses combined stereo power, a logarithmic frequency axis (40 Hz–24 kHz), and brightness for −90 to 0 dBFS. It updates after timed preview or export; a playhead follows timed preview. Analysis is capped at 800 time columns to bound memory, so very long samples have reduced time detail. Pitch/confidence, harmonic analysis, sample browsing, sequencer, and loop export are future stages.
+- Waveform and linear-frequency spectrum show the mono average of recent playback. The full-sample spectrogram uses combined stereo power, a logarithmic frequency axis (40 Hz–24 kHz), and brightness for −90 to 0 dBFS. It updates after timed preview or export; a playhead follows timed preview. Analysis has quality-dependent time-column limits to bound memory; zoom into a region to recover finer time detail on longer samples. Pitch/confidence, harmonic analysis, sample browsing, sequencer, and loop export are future stages.
 - The initial filter envelope shares amplitude envelope timing; independent filter envelope controls are still to come.
 - This first DSP implementation uses Python and processes preview blocks on the GUI thread. It is not a finished low-latency audio engine. Heavy modulation may alias; parameter changes are not smoothed yet. Real-time performance and audio quality need refinement and measurement on Mint before calling this production-ready.
 - Export runs on a worker thread. WAV and patch are separate saves; an error saving metadata can leave a valid WAV without its companion patch.
