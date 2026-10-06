@@ -26,6 +26,14 @@ If Mint reports that venv is unavailable, install its `python3-venv` package. Qt
 
 Export cancellation leaves an existing destination WAV untouched. Do not delete companion patch files if you want to recall a sound. Keep projects outside the source checkout.
 
+## Visualization windows
+
+Use the **View** menu to toggle **Oscilloscope**, **Spectrum analyzer**, and **Spectrogram** independently. Each has its own resizable window and can be moved to another monitor. Closing a visualization hides it without discarding its analysis or stopping audio.
+
+Window positions, sizes, and visibility are saved when you close the main application and restored next time. **Bring visible visualizations to front** raises enabled windows (including minimized ones). **Reset window positions** moves them onto the main window's screen without enabling hidden windows. Saved windows whose title bars are outside the current monitors are automatically repositioned.
+
+Hidden/minimized live plots skip refresh work. Full-sample spectrogram analysis still runs after rendering, so the latest result is available when reopened; image construction is deferred while hidden. On Linux, layout preferences normally live in `~/.config/SeqAndDestroy/SeqAndDestroy2.conf` (or beneath `XDG_CONFIG_HOME` if set), separately from projects.
+
 ## Prototype limits
 
 - Audition is monophonic. Audio output must support 48 kHz stereo PCM. No physical output device is available in cloud testing; audition and MPC import need testing on the user's hardware.

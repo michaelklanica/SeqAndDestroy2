@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from PySide6.QtWidgets import QApplication
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QSettings
 from seqdestroy.app import Export, Window
 import numpy as np
 
@@ -29,7 +29,9 @@ class PreviewTests(unittest.TestCase):
         np.testing.assert_array_equal(preview[0],exported[0]); np.testing.assert_array_equal(preview[1],exported[1])
         self.assertTrue(preview[2]); self.assertFalse(exported[2])
     def test_window_analysis(self):
-        w=Window(); w.show(); self.app.processEvents()
+        temp=tempfile.TemporaryDirectory(); self.addCleanup(temp.cleanup)
+        settings=QSettings(str(Path(temp.name)/'layout.ini'),QSettings.Format.IniFormat)
+        w=Window(settings=settings); w.show(); self.app.processEvents()
         w.prepared(np.zeros((4800,2),np.int16),np.full((256,10),-100,np.float32),False)
         self.assertAlmostEqual(w.spectrogram.duration,.1)
         self.assertFalse(w.grab().isNull()); w.grab().save('/tmp/seqdestroy-stereo.png'); w.close()

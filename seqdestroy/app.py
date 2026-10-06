@@ -4,10 +4,11 @@ import wave
 from pathlib import Path
 from dataclasses import asdict
 import numpy as np
-from PySide6.QtCore import Qt,QTimer,QThread,Signal,QPointF,QEvent,QBuffer,QByteArray,QIODevice,QRectF
+from PySide6.QtCore import Qt,QTimer,QThread,Signal,QPointF,QEvent,QBuffer,QByteArray,QIODevice,QRectF,QSettings
 from PySide6.QtGui import QPainter,QColor,QPolygonF,QImage
 from PySide6.QtWidgets import QApplication,QMainWindow,QWidget,QVBoxLayout,QHBoxLayout,QFormLayout,QDoubleSpinBox,QSpinBox,QComboBox,QPushButton,QLabel,QFileDialog,QMessageBox,QProgressDialog,QGroupBox
 from PySide6.QtMultimedia import QAudioFormat,QAudioSink,QMediaDevices
+from .windows import VisualizationWindow
 from .analysis import spectrogram
 from .engine import Patch,LIMITS,Voice,RATE,render,save_patch,load_patch,Cancelled
 
@@ -25,12 +26,20 @@ class Plot(QWidget):
 
 class Spectrogram(QWidget):
     def __init__(self):
-        super().__init__(); self.setMinimumHeight(210); self.image=None; self.duration=0; self.position=None
+        super().__init__(); self.setMinimumHeight(210); self.image=None; self.duration=0; self.position=None; self.pending_data=None
     def set_data(self,db,duration):
+        self.duration=duration; self.position=None
+        if not self.isVisible():
+            self.pending_data=(db,duration)
+            return
+        self.pending_data=None
         level=np.clip((db[::-1]+90)/90,0,1)
         rgb=np.stack((255*level**.6,220*level**1.5,100*level**3),axis=-1).astype(np.uint8)
         h,w,_=rgb.shape; self.image=QImage(rgb.data,w,h,3*w,QImage.Format.Format_RGB888).copy()
         self.duration=duration; self.position=None; self.update()
+    def showEvent(self,event):
+        if self.pending_data is not None:self.set_data(*self.pending_data)
+        super().showEvent(event)
     def paintEvent(self,event):
         p=QPainter(self); p.fillRect(self.rect(),QColor('#14212b')); p.setPen(QColor('#c2ddd8'))
         p.drawText(10,18,'Spectrogram · combined stereo power · logarithmic frequency · dark −90 / bright 0 dBFS')
@@ -63,8 +72,9 @@ class Export(QThread):
         except Exception as e:self.result.emit('Render/analysis error: '+str(e))
 
 class Window(QMainWindow):
-    def __init__(self):
-        super().__init__(); self.setWindowTitle('SeqAndDestroy · Sample synth'); self.resize(1150,900)
+    def __init__(self,settings=None):
+        super().__init__(); self.setWindowTitle('SeqAndDestroy · Sample synth'); self.resize(1150,470)
+        self.settings=settings if settings is not None else QSettings("SeqAndDestroy", "SeqAndDestroy2")
         self.controls={}; self.voice=None; self.audio=None; self.worker=None; self.project=None; self.history=np.zeros(2048); self.ticks=0; self.preview_buffer=None; self.preview_audio=None; self.pending=b''
         root=QWidget(); self.setCentralWidget(root); layout=QVBoxLayout(root); buttons=QHBoxLayout(); layout.addLayout(buttons)
         for name,fn in [('Open/create project',self.project_open),('Load patch',self.load),('Save patch',self.save),('Render sample',self.export),('Timed preview · F2',self.preview),('Stop preview',self.stop_preview)]:
@@ -85,11 +95,26 @@ class Window(QMainWindow):
             label={'pan1':'Osc 1 pan (−1 L / +1 R)','pan2':'Osc 2 pan (−1 L / +1 R)','noise_pan':'Noise pan (−1 L / +1 R)'}.get(name,name.replace('_',' ').capitalize()); c.setAccessibleName(label); self.controls[name]=c
             index=0 if name in ('wave1','wave2','detune','mix','noise','pan1','pan2','noise_pan') else 1 if name in ('cutoff','resonance','attack','decay','sustain','release','filter_env') else 2
             forms[index].addRow(label,c)
-        plots=QHBoxLayout(); layout.addLayout(plots); self.scope=Plot(); self.spectrum=Plot(True); plots.addWidget(self.scope); plots.addWidget(self.spectrum)
-        self.spectrogram=Spectrogram(); layout.addWidget(self.spectrogram)
+        self.scope=Plot(); self.spectrum=Plot(True); self.spectrogram=Spectrogram()
+        self.visualizations={}
+        view=self.menuBar().addMenu('&View')
+        for offset,(key,title,plot) in enumerate((('scope','Oscilloscope',self.scope),('spectrum','Spectrum analyzer',self.spectrum),('spectrogram','Spectrogram',self.spectrogram))):
+            window=VisualizationWindow(self,title,plot,self.settings,key,offset)
+            self.visualizations[key]=window
+            view.addAction(window.action)
+        view.addSeparator()
+        view.addAction('Bring visible visualizations to front',self.bring_visualizations_forward)
+        view.addAction('Reset window positions',self.reset_visualization_positions)
         self.status=QLabel('Hold F1 to audition · Tab to navigate · Arrow keys adjust controls'); layout.addWidget(self.status)
         self.timer=QTimer(self); self.timer.timeout.connect(self.pump); self.timer.start(20)
         QApplication.instance().installEventFilter(self)
+    def bring_visualizations_forward(self):
+        for window in self.visualizations.values():
+            if window.action.isChecked():
+                if window.isMinimized():window.showNormal()
+                window.ensure_on_screen(); window.raise_(); window.activateWindow()
+    def reset_visualization_positions(self):
+        for window in self.visualizations.values():window.reset_position()
     def eventFilter(self,obj,e):
         if e.type()==QEvent.Type.KeyPress and e.key()==Qt.Key.Key_F2:
             if not e.isAutoRepeat():self.preview()
@@ -122,14 +147,18 @@ class Window(QMainWindow):
         if self.audio:self.audio.stop()
         if self.preview_buffer:self.preview_buffer.close(); self.preview_buffer.deleteLater()
         self.preview_buffer=None; self.preview_audio=None
-        self.spectrogram.position=None; self.spectrogram.update()
+        self.spectrogram.position=None
+        if self.spectrogram.isVisible():self.spectrogram.update()
     def display_audio(self,a):
+        visible=[plot for plot in (self.scope,self.spectrum) if plot.isVisible() and not plot.window().isMinimized()]
+        if not visible:return
         self.history=np.concatenate((self.history,a.mean(axis=1)))[-2048:]
-        for plot in (self.scope,self.spectrum):plot.data=self.history; plot.update()
+        for plot in visible:plot.data=self.history; plot.update()
     def pump(self):
         if self.preview_buffer is not None:
             position=self.audio.processedUSecs()/1000000; index=int(position*RATE)
-            self.spectrogram.position=position; self.spectrogram.update()
+            self.spectrogram.position=position
+            if self.spectrogram.isVisible() and not self.spectrogram.window().isMinimized():self.spectrogram.update()
             a=self.preview_audio[max(0,index-2048):index]
             if len(a):self.display_audio(a.astype(np.float32)/32768)
             if index>=len(self.preview_audio):self.stop_preview()
@@ -195,6 +224,11 @@ class Window(QMainWindow):
         self.dialog.close()
         if message!='Timed preview ready.' or self.preview_buffer is not None:self.status.setText(message)
     def closeEvent(self,e):
+        self.timer.stop()
+        QApplication.instance().removeEventFilter(self)
+        for window in self.visualizations.values():
+            window.save(); window.hide()
+        self.settings.sync()
         if self.worker and self.worker.isRunning():self.worker.cancelled=True; self.worker.wait()
         if self.audio:self.audio.stop()
         e.accept()
