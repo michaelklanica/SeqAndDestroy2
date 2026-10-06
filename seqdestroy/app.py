@@ -45,15 +45,16 @@ class Window(QMainWindow):
         row.addWidget(QLabel('MIDI note')); row.addWidget(self.note); row.addWidget(QLabel('Timed preview / export hold (seconds)')); row.addWidget(self.hold)
         b=QPushButton('Hold to audition · F1'); b.pressed.connect(self.start); b.released.connect(self.stop); row.addWidget(b)
         columns=QHBoxLayout(); layout.addLayout(columns); forms=[]
-        for title in ['Oscillators','Filter and envelopes','Modulation']:
+        for title in ['Oscillators','Filter envelope','Amplitude envelope','Modulation']:
             group=QGroupBox(title); form=QFormLayout(group); forms.append(form); columns.addWidget(group)
         for name,value in asdict(Patch()).items():
             if isinstance(value,str):
                 c=QComboBox(); c.addItems(['FM','Ring'] if name=='modulation' else ['Sine','Saw','Square','Triangle']); c.setCurrentText(value)
             else:
-                c=QDoubleSpinBox(); c.setDecimals(3); c.setRange(*LIMITS[name]); c.setValue(value); c.setSingleStep(100 if name in ('cutoff','filter_env') else .01 if name in ('mix','noise','attack','decay','sustain','release','resonance') else .1)
-            label={'pan1':'Osc 1 pan (−1 L / +1 R)','pan2':'Osc 2 pan (−1 L / +1 R)','noise_pan':'Noise pan (−1 L / +1 R)'}.get(name,name.replace('_',' ').capitalize()); c.setAccessibleName(label); self.controls[name]=c
-            index=0 if name in ('wave1','wave2','detune','mix','noise','pan1','pan2','noise_pan') else 1 if name in ('cutoff','resonance','attack','decay','sustain','release','filter_env') else 2
+                c=QDoubleSpinBox(); c.setDecimals(3); c.setRange(*LIMITS[name]); c.setValue(value); c.setSingleStep(100 if name in ('cutoff','filter_env') else .01 if name in ('mix','noise','attack','decay','sustain','release','resonance','filter_attack','filter_decay','filter_sustain','filter_release') else .1)
+            label={'pan1':'Osc 1 pan (−1 L / +1 R)','pan2':'Osc 2 pan (−1 L / +1 R)','noise_pan':'Noise pan (−1 L / +1 R)','filter_env':'Depth (Hz)','filter_attack':'Attack (s)','filter_decay':'Decay (s)','filter_sustain':'Sustain (0–1)','filter_release':'Release (s)','attack':'Attack (s)','decay':'Decay (s)','sustain':'Sustain (0–1)','release':'Release (s)','cutoff':'Base cutoff (Hz)'}.get(name,name.replace('_',' ').capitalize()); c.setAccessibleName(label); self.controls[name]=c
+            index=0 if name in ('wave1','wave2','detune','mix','noise','pan1','pan2','noise_pan') else 1 if name in ('cutoff','resonance','filter_env','filter_attack','filter_decay','filter_sustain','filter_release') else 2 if name in ('attack','decay','sustain','release') else 3
+            c.setAccessibleName(('Filter ' if name.startswith('filter_') else 'Amplitude ' if name in ('attack','decay','sustain','release') else '')+label)
             forms[index].addRow(label,c)
         self.scope=Plot(); self.spectrum=Plot(True); self.spectrogram=Spectrogram()
         self.visualizations={}

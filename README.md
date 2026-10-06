@@ -34,6 +34,16 @@ Window positions, sizes, and visibility are saved when you close the main applic
 
 Hidden/minimized live plots skip refresh work. Full-sample spectrogram analysis still runs after rendering, so the latest result is available when reopened; image construction is deferred while hidden. On Linux, layout preferences normally live in `~/.config/SeqAndDestroy/SeqAndDestroy2.conf` (or beneath `XDG_CONFIG_HOME` if set), separately from projects.
 
+## Independent filter envelope
+
+The **Filter envelope** section has base cutoff, resonance, depth in Hz, and separate Attack, Decay, Sustain, and Release controls. Attack raises the cutoff toward base + depth, decay lowers it toward base + depth × sustain, and release returns it toward the base cutoff from its level at note-off. Cutoff is capped at 16 kHz internally. Depth zero disables envelope movement.
+
+The **Amplitude envelope** independently controls loudness. Both envelopes start at note-on and begin release at note-off, including when the note is released during attack or decay. The exported sample remains note-hold time plus **amplitude** release; filter release is only audible while the amplitude envelope is still sounding.
+
+Try base cutoff 300 Hz, depth 6000 Hz, filter attack 0.5 s, decay 0.8 s, and sustain 0.2, while keeping amplitude sustain high. Hold F1 or use a two-second timed preview to hear the brightness open and settle independently of volume.
+
+Older version-1 patches automatically copy their amplitude ADSR into the new filter ADSR fields on load, preserving their original sound. Saving writes version 2 with both envelopes. Older application versions cannot load these new version-2 files; original files are unchanged unless you explicitly overwrite them.
+
 ## Chart axes and cursor readouts
 
 All charts have size-dependent ticks and grid lines. The oscilloscope shows elapsed milliseconds within the recent audio buffer and amplitude from −1 to +1, including a zero line. The spectrum shows frequency in Hz (k denotes thousands) and level in dBFS. The spectrogram shows time in seconds, logarithmic frequency, and a labeled −90 to 0 dBFS color scale.
@@ -56,7 +66,7 @@ The independent analysis component accepts mono or multichannel int16 PCM or nor
 
 - Audition is monophonic. Audio output must support 48 kHz stereo PCM. No physical output device is available in cloud testing; audition and MPC import need testing on the user's hardware.
 - Waveform and linear-frequency spectrum show the mono average of recent playback. The full-sample spectrogram uses combined stereo power, a logarithmic frequency axis (40 Hz–24 kHz), and brightness for −90 to 0 dBFS. It updates after timed preview or export; a playhead follows timed preview. Analysis has quality-dependent time-column limits to bound memory; zoom into a region to recover finer time detail on longer samples. Pitch/confidence, harmonic analysis, sample browsing, sequencer, and loop export are future stages.
-- The initial filter envelope shares amplitude envelope timing; independent filter envelope controls are still to come.
+- Filter and amplitude envelopes have independent timing. Amplitude release determines the audible/exported tail; a longer filter release does not add trailing silence.
 - This first DSP implementation uses Python and processes preview blocks on the GUI thread. It is not a finished low-latency audio engine. Heavy modulation may alias; parameter changes are not smoothed yet. Real-time performance and audio quality need refinement and measurement on Mint before calling this production-ready.
 - Export runs on a worker thread. WAV and patch are separate saves; an error saving metadata can leave a valid WAV without its companion patch.
 

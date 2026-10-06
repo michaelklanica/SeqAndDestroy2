@@ -27,6 +27,10 @@ class Patch:
     sustain: float = 0.65
     release: float = 0.4
     filter_env: float = 1200.0
+    filter_attack: float = 0.01
+    filter_decay: float = 0.2
+    filter_sustain: float = 0.65
+    filter_release: float = 0.4
     lfo_rate: float = 2.0
     lfo_depth: float = 0.0
     drive: float = 1.0
@@ -34,6 +38,8 @@ class Patch:
     mod_amount: float = 0.0
 
 LIMITS = {
+ 'filter_attack':(0.001,3), 'filter_decay':(0.001,3),
+ 'filter_sustain':(0,1), 'filter_release':(0.01,5),
  'pan1':(-1,1), 'pan2':(-1,1), 'noise_pan':(-1,1),
  'detune':(-100,100), 'mix':(0,1), 'noise':(0,1), 'cutoff':(40,12000),
  'resonance':(0,0.9), 'attack':(0.001,3), 'decay':(0.001,3),
@@ -52,12 +58,17 @@ def validate(p):
 
 def save_patch(path,p):
     validate(p)
-    Path(path).write_text(json.dumps({'version':1,'patch':asdict(p)},indent=2))
+    Path(path).write_text(json.dumps({'version':2,'patch':asdict(p)},indent=2))
 
 def load_patch(path):
     data=json.loads(Path(path).read_text())
-    if data.get('version')!=1: raise ValueError('Unsupported patch version')
-    return validate(Patch(**data['patch']))
+    if data.get('version') not in (1,2): raise ValueError('Unsupported patch version')
+    values=dict(data['patch'])
+    if data['version']==1:
+        defaults=Patch()
+        for name in ('attack','decay','sustain','release'):
+            values.setdefault('filter_'+name,values.get(name,getattr(defaults,name)))
+    return validate(Patch(**values))
 
 def osc(phase,kind,step):
     t=phase%1
@@ -78,14 +89,19 @@ class Voice:
     def __init__(self,p,note=60,rate=RATE):
         self.p=validate(p); self.rate=rate; self.freq=440*2**((note-69)/12)
         self.i=0; self.phase1=0.; self.phase2=0.; self.low=[0.,0.]; self.band=[0.,0.]
-        self.off=None; self.off_level=0.; self.rng=np.random.default_rng(42)
+        self.off=None; self.off_level=0.; self.filter_off_level=0.; self.rng=np.random.default_rng(42)
     def env(self,t):
         p=self.p
         if t<p.attack: return t/p.attack
         return p.sustain+(1-p.sustain)*max(0,1-(t-p.attack)/p.decay)
+    def filter_envelope(self,t):
+        p=self.p
+        if t<p.filter_attack:return t/p.filter_attack
+        return p.filter_sustain+(1-p.filter_sustain)*max(0,1-(t-p.filter_attack)/p.filter_decay)
     def release(self):
         if self.off is None:
             self.off=self.i; self.off_level=self.env(self.i/self.rate)
+            self.filter_off_level=self.filter_envelope(self.i/self.rate)
     @property
     def finished(self):
         return self.off is not None and self.i-self.off>=round(self.p.release*self.rate)
@@ -93,14 +109,16 @@ class Voice:
         p=self.p; out=np.empty((n,2),dtype=np.float32); noise=self.rng.uniform(-1,1,n)
         gains=[(math.cos((pan+1)*math.pi/4), math.sin((pan+1)*math.pi/4)) for pan in (p.pan1,p.pan2,p.noise_pan)]
         for j in range(n):
-            t=self.i/self.rate; e=self.env(t)
-            if self.off is not None: e=self.off_level*max(0,1-(self.i-self.off)/(p.release*self.rate))
+            t=self.i/self.rate; e=self.env(t); filter_e=self.filter_envelope(t)
+            if self.off is not None:
+                e=self.off_level*max(0,1-(self.i-self.off)/(p.release*self.rate))
+                filter_e=self.filter_off_level*max(0,1-(self.i-self.off)/(p.filter_release*self.rate))
             f=self.freq*2**(p.lfo_depth*math.sin(2*math.pi*p.lfo_rate*t)/12)
             d1=min(f/self.rate,0.4); d2=min(f*2**(p.detune/1200)/self.rate,0.4)
             b=osc(self.phase2,p.wave2,d2)
             a=osc(self.phase1+(p.mod_amount*b/(2*math.pi) if p.modulation=='FM' else 0),p.wave1,d1)
             if p.modulation=='Ring': a*=1-min(p.mod_amount,1)+min(p.mod_amount,1)*b
-            g=math.tan(math.pi*min(16000,p.cutoff+p.filter_env*e)/self.rate)
+            g=math.tan(math.pi*min(16000,p.cutoff+p.filter_env*filter_e)/self.rate)
             k=2-1.9*p.resonance
             for ch in range(2):
                 x=((1-p.mix)*a*gains[0][ch]+p.mix*b*gains[1][ch]+p.noise*noise[j]*gains[2][ch])/(1+p.noise)
