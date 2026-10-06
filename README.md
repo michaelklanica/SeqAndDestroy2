@@ -34,6 +34,12 @@ Window positions, sizes, and visibility are saved when you close the main applic
 
 Hidden/minimized live plots skip refresh work. Full-sample spectrogram analysis still runs after rendering, so the latest result is available when reopened; image construction is deferred while hidden. On Linux, layout preferences normally live in `~/.config/SeqAndDestroy/SeqAndDestroy2.conf` (or beneath `XDG_CONFIG_HOME` if set), separately from projects.
 
+## Chart axes and cursor readouts
+
+All charts have size-dependent ticks and grid lines. The oscilloscope shows elapsed milliseconds within the recent audio buffer and amplitude from −1 to +1, including a zero line. The spectrum shows frequency in Hz (k denotes thousands) and level in dBFS. The spectrogram shows time in seconds, logarithmic frequency, and a labeled −90 to 0 dBFS color scale.
+
+Move the pointer over a chart to read values beneath it. Oscilloscope and spectrum readouts use the nearest sample/bin; spectrogram values use the nearest analysis cell. These are estimates at the selected analysis resolution, not additional measurement precision.
+
 ## Spectrogram detail and zoom
 
 After **Timed preview** or **Render sample**, the spectrogram analyzes that audio in its own background worker. Playback can start without waiting for analysis. Changing analysis controls reuses the last rendered audio; it does not synthesize a different sound.
@@ -41,7 +47,7 @@ After **Timed preview** or **Render sample**, the spectrogram analyzes that audi
 - **Quality:** Fast, Balanced (default), or Detailed. These increase frequency display rows and time sampling density. Maximum time columns are 512 / 1600 / 4096 and frequency rows are 256 / 512 / 1024. Detailed data is calculated, not merely upscaled.
 - **Transient:** a 512-sample window (10.7 ms at 48 kHz) for attacks and fast changes. Detailed uses a finer time step; frequency precision remains limited by the short window.
 - **Tonal:** 4096 / 8192 / 16384-sample windows by quality. Detailed has 2.93 Hz FFT spacing at 48 kHz, but this is not a guarantee of resolving tones that close: the Hann window broadens peaks. Long windows smear rapid events.
-- **Zoom:** type Start/End seconds and Low/High Hz, then press **Analyze / zoom**. This recomputes the selected region at the chosen quality. **Full range** restores the complete sample and frequency range. This version uses numeric range controls, not mouse-wheel zoom.
+- **Zoom:** type Start/End seconds and Low/High Hz, then press **Analyze / zoom**. This recomputes the selected region at the chosen quality. **Full range** restores the complete sample and frequency range. You can also use the mouse directly over the chart: scroll to zoom around the pointer, left-drag a rectangle to select a region, right-drag to pan, and double-click to restore the full range. Numeric fields follow mouse selections. Mouse gestures trigger background reanalysis after a short debounce; the previous completed image remains visible until the new one is ready.
 - **Cancel analysis** stops pending work and retains the last completed image. Progress appears in the spectrogram window. The status beneath it identifies the displayed result's mode, quality, window duration, FFT spacing, time step, and cell count.
 
 The independent analysis component accepts mono or multichannel int16 PCM or normalized floating-point audio with an explicit sample rate. It can be reused for future rendered sequencer tracks/mixes; sequencer source selection is not implemented yet.

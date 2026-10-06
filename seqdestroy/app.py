@@ -8,21 +8,10 @@ from PySide6.QtCore import Qt,QTimer,QThread,Signal,QPointF,QEvent,QBuffer,QByte
 from PySide6.QtGui import QPainter,QColor,QPolygonF,QImage
 from PySide6.QtWidgets import QApplication,QMainWindow,QWidget,QVBoxLayout,QHBoxLayout,QFormLayout,QDoubleSpinBox,QSpinBox,QComboBox,QPushButton,QLabel,QFileDialog,QMessageBox,QProgressDialog,QGroupBox
 from PySide6.QtMultimedia import QAudioFormat,QAudioSink,QMediaDevices
+from .charts import Plot
 from .windows import VisualizationWindow
 from .spectrogram import Spectrogram
 from .engine import Patch,LIMITS,Voice,RATE,render,save_patch,load_patch,Cancelled
-
-class Plot(QWidget):
-    def __init__(self,spectrum=False):
-        super().__init__(); self.spectrum=spectrum; self.data=np.zeros(2048); self.setMinimumSize(300,170)
-    def paintEvent(self,event):
-        p=QPainter(self); p.fillRect(self.rect(),QColor('#14212b')); p.setPen(QColor('#72dcc2'))
-        p.drawText(10,20,'Spectrum: 0–24 kHz, −90 to 0 dBFS' if self.spectrum else 'Oscilloscope: recent audio')
-        a=self.data
-        if self.spectrum:a=np.clip((20*np.log10(np.maximum(abs(np.fft.rfft(a*np.hanning(len(a))))/(len(a)/4),1e-5))+90)/90,0,1)
-        else:a=(a+1)/2
-        ids=np.linspace(0,len(a)-1,min(len(a),self.width())).astype(int)
-        p.drawPolyline(QPolygonF([QPointF(i*(self.width()-1)/(len(ids)-1),30+(1-a[j])*(self.height()-40)) for i,j in enumerate(ids)]))
 
 class Export(QThread):
     progress=Signal(int); result=Signal(str); prepared=Signal(object,object,bool)
